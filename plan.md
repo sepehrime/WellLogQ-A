@@ -34,19 +34,19 @@ Each phase has **Build** tasks and **Verify** checks. Finish all the Verify boxe
 
 **Build**
 
-- [ ] Put a sample LAS file in `data/`: one of yours, or a public one (Kansas Geological Survey, Equinor Volve)
-- [ ] Write `load_las(path) -> (df, curves)`
-  - [ ] `lasio.read(path).df()` gives a DataFrame indexed by depth
-  - [ ] Replace null values (`-999.25`) with NaN
-  - [ ] `curves` is a list of `{mnemonic, unit, description}` from the header
-  - [ ] Detect the depth unit (m or ft)
-- [ ] Notebook cell: load the file and show `df.head()`, `df.describe()` and the curve list
+- [x] Put a sample LAS file in `data/`: one of yours, or a public one (Kansas Geological Survey, Equinor Volve)
+- [x] Write `load_las(path) -> (df, curves)`
+  - [x] `lasio.read(path).df()` gives a DataFrame indexed by depth
+  - [x] Replace null values (`-999.25`) with NaN
+  - [x] `curves` is a list of `{mnemonic, unit, description}` from the header
+  - [x] Detect the depth unit (m or ft)
+- [x] Notebook cell: load the file and show `df.head()`, `df.describe()` and the curve list
 
 **Verify**
 
-- [ ] The depth range and curve names match what the LAS header says
-- [ ] No `-999.25` values are left (`(df == -999.25).sum().sum() == 0`)
-- [ ] You know which curves are gamma ray and porosity, and their units (API; v/v or %)
+- [x] The depth range and curve names match what the LAS header says
+- [x] No `-999.25` values are left (`(df == -999.25).sum().sum() == 0`)
+- [x] You know which curves are gamma ray and porosity, and their units (API; v/v or %)
 
 ---
 
