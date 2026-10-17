@@ -14,6 +14,8 @@ import math
 
 import numpy as np
 import pandas as pd
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 
 class WellLogError(ValueError):
@@ -143,3 +145,46 @@ def flag_zones(df: pd.DataFrame, curve: str, threshold: float, above: bool = Tru
             "mean": math.fsum(run) / run.size,
         })
     return zones
+
+
+def plot_logs(df: pd.DataFrame, curves: str | list[str], top: float | None = None,
+              base: float | None = None, zones: list[dict] | None = None) -> go.Figure:
+    """Plot one track per curve side by side, depth increasing downward.
+
+    Tracks share the depth axis, so zooming or panning one moves the others. ``zones``
+    (e.g. from ``flag_zones``) are drawn as shaded bands across all tracks, padded by half
+    a step on each side so one-sample zones stay visible. Resistivity curves (ohm-m) use
+    a log scale.
+    """
+    df = _sorted(df)
+    if isinstance(curves, str):
+        curves = [curves]
+    if not curves:
+        raise WellLogError("Give at least one curve to plot.")
+    cols = [resolve_curve(df, c) for c in curves]
+    top, base = _interval(df, top, base)
+    data = df.loc[top:base, cols]
+    depth_unit = df.attrs.get("depth_unit") or ""
+    half = _step(df) / 2
+
+    fig = make_subplots(rows=1, cols=len(cols), shared_yaxes=True, horizontal_spacing=0.02)
+    for i, col in enumerate(cols, start=1):
+        unit = _unit(df, col)
+        fig.add_trace(
+            go.Scatter(x=data[col], y=data.index, mode="lines", name=col, line={"width": 1},
+                       hovertemplate=f"{col}: %{{x:.4g}} {unit}<br>Depth: %{{y}} {depth_unit}<extra></extra>"),
+            row=1, col=i,
+        )
+        fig.update_xaxes(title_text=f"{col} ({unit})" if unit else col, side="top",
+                         type="log" if "OHM" in unit.upper() else "linear", row=1, col=i)
+
+    for z in zones or []:
+        fig.add_hrect(y0=z["top"] - half, y1=z["base"] + half, fillcolor="orange", opacity=0.3,
+                      line_width=0, layer="below", row="all", col="all")
+
+    fig.update_yaxes(range=[base, top], title_text=f"Depth ({depth_unit})" if depth_unit else "Depth",
+                     row=1, col=1)
+    title = df.attrs.get("well") or ""
+    fig.update_layout(title=title, height=800, width=max(300, 220 * len(cols)), showlegend=False,
+                      hovermode="y unified", margin={"t": 100})
+    return fig

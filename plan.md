@@ -73,17 +73,17 @@ Each phase has **Build** tasks and **Verify** checks. Finish all the Verify boxe
 
 **Build**
 
-- [ ] `plot_logs(df, curves, top=None, base=None, zones=None)` returns a Plotly figure
-  - [ ] One track per curve: `make_subplots(rows=1, cols=n, shared_yaxes=True)`
-  - [ ] The depth axis is reversed, so depth increases downward
-  - [ ] Zones are drawn as shaded bands (`add_hrect`)
-  - [ ] Axis labels include units
+- [x] `plot_logs(df, curves, top=None, base=None, zones=None)` returns a Plotly figure
+  - [x] One track per curve: `make_subplots(rows=1, cols=n, shared_yaxes=True)`
+  - [x] The depth axis is reversed, so depth increases downward
+  - [x] Zones are drawn as shaded bands (`add_hrect`)
+  - [x] Axis labels include units
 
 **Verify**
 
-- [ ] The notebook shows GR and porosity tracks side by side
-- [ ] High-GR zones from `flag_zones` appear as shaded bands in the right places
-- [ ] Zooming or panning one track moves the others with it
+- [x] The notebook shows GR and porosity tracks side by side
+- [x] High-GR zones from `flag_zones` appear as shaded bands in the right places
+- [x] Zooming or panning one track moves the others with it
 
 ---
 

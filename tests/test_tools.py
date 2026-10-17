@@ -5,7 +5,7 @@ import pandas as pd
 import pytest
 
 from welllog.data import load_las
-from welllog.tools import WellLogError, curve_stats, flag_zones, list_curves
+from welllog.tools import WellLogError, curve_stats, flag_zones, list_curves, plot_logs
 
 SAMPLE = Path(__file__).parent.parent / "data" / "sample.las"
 
@@ -104,3 +104,24 @@ def test_curve_stats_matches_pandas_on_sample_file():
     assert stats["mean"] == pytest.approx(real.loc[2500:2700, "CNLS"].mean(), rel=1e-12)
     assert stats["count"] == real.loc[2500:2700, "CNLS"].count()
     assert stats["unit"] == "PU" and stats["depth_unit"] == "ft"
+
+
+def test_plot_logs_tracks_axes_and_zones(df):
+    zones = flag_zones(df, "GR", threshold=100)
+    fig = plot_logs(df, ["GR", "nphi"], top=101, base=108, zones=zones)
+    assert [t.name for t in fig.data] == ["GR", "NPHI"]
+    assert fig.layout.xaxis.title.text == "GR (GAPI)"
+    assert fig.layout.xaxis2.title.text == "NPHI (V/V)"
+    assert fig.layout.yaxis.range == (108.0, 101.0)            # reversed: depth increases downward
+    assert fig.layout.yaxis.title.text == "Depth (m)"
+    assert fig.layout.yaxis2.matches == "y"                    # tracks zoom/pan together
+    assert min(fig.data[0].y) == 101.0 and max(fig.data[0].y) == 108.0
+    bands = [(s.y0, s.y1) for s in fig.layout.shapes]
+    assert bands == [(103.75, 105.25)] * 2                     # one zone, drawn on both tracks
+
+
+def test_plot_logs_bad_input(df):
+    with pytest.raises(WellLogError, match="Unknown curve"):
+        plot_logs(df, ["GR", "RHOB"])
+    with pytest.raises(WellLogError, match="at least one curve"):
+        plot_logs(df, [])
