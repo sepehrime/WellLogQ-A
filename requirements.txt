@@ -1,0 +1,8 @@
+lasio
+pandas
+numpy
+plotly
+anthropic
+python-dotenv
+jupyter
+pytest
