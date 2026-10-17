@@ -28,7 +28,8 @@ def load_las(path: str | Path) -> tuple[pd.DataFrame, list[dict]]:
 
     Returns ``(df, curves)``:
       - ``df`` is indexed by depth, one column per curve, with null values as NaN.
-        ``df.attrs["depth_unit"]`` is "m", "ft" or None; ``df.attrs["well"]`` is the WELL name.
+        ``df.attrs["depth_unit"]`` is "m", "ft" or None; ``df.attrs["well"]`` is the WELL name;
+        ``df.attrs["units"]`` maps each curve mnemonic to its unit.
       - ``curves`` is a list of ``{mnemonic, unit, description}`` for every non-depth curve,
         in file order.
     """
@@ -52,4 +53,5 @@ def load_las(path: str | Path) -> tuple[pd.DataFrame, list[dict]]:
         {"mnemonic": c.mnemonic, "unit": c.unit.strip(), "description": c.descr.strip()}
         for c in las.curves[1:]
     ]
+    df.attrs["units"] = {c["mnemonic"]: c["unit"] for c in curves}
     return df, curves

@@ -54,18 +54,18 @@ Each phase has **Build** tasks and **Verify** checks. Finish all the Verify boxe
 
 **Build**
 
-- [ ] `list_curves(df, curves)` returns mnemonics, units, descriptions and depth range
-- [ ] `curve_stats(df, curve, top=None, base=None)` returns mean, min, max, P10/P50/P90 and the count of valid samples
-- [ ] `flag_zones(df, curve, threshold, above=True, min_thickness=0)` returns `[{top, base, thickness, mean}]`
-- [ ] Bad input gives a clear error message, not a crash (unknown curve, interval outside the logged depth, top > base)
-- [ ] `tests/test_tools.py` uses a small made-up DataFrame with known values
+- [x] `list_curves(df, curves)` returns mnemonics, units, descriptions and depth range
+- [x] `curve_stats(df, curve, top=None, base=None)` returns mean, min, max, P10/P50/P90 and the count of valid samples
+- [x] `flag_zones(df, curve, threshold, above=True, min_thickness=0)` returns `[{top, base, thickness, mean}]`
+- [x] Bad input gives a clear error message, not a crash (unknown curve, interval outside the logged depth, top > base)
+- [x] `tests/test_tools.py` uses a small made-up DataFrame with known values
 
 **Verify**
 
-- [ ] `pytest tests/` passes
-- [ ] Test: constant porosity of 0.20 gives a mean of exactly 0.20
-- [ ] Test: one GR spike gives exactly one flagged zone with the correct top and base
-- [ ] On the real file, `curve_stats` matches a manual `df.loc[top:base, curve].mean()`
+- [x] `pytest tests/` passes
+- [x] Test: constant porosity of 0.20 gives a mean of exactly 0.20
+- [x] Test: one GR spike gives exactly one flagged zone with the correct top and base
+- [x] On the real file, `curve_stats` matches a manual `df.loc[top:base, curve].mean()`
 
 ---
 
