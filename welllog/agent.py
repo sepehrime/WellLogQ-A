@@ -1,10 +1,12 @@
-"""Claude agent that answers questions about one LAS file using the tools in ``welllog.tools``.
+"""LLM agent that answers questions about one LAS file using the tools in ``welllog.tools``.
 
-Claude never computes numbers itself: every value comes from a tool call, and Claude only
-picks the tool and explains the result.
+The model never computes numbers itself: every value comes from a tool call, and the model
+only picks the tool and explains the result.
 
 Requests go through OpenRouter's Anthropic-compatible endpoint, authenticated with
-``OPENROUTER_API_KEY`` (from the environment or ``.env``), using the Anthropic SDK.
+``OPENROUTER_API_KEY`` (from the environment or ``.env``), using the Anthropic SDK. By default
+it uses free OpenRouter models (``FREE_MODELS``), trying the next one when a model is
+rate-limited or unavailable. Set ``OPENROUTER_MODEL`` (comma-separated) to choose others.
 """
 
 import json
@@ -20,7 +22,20 @@ from welllog.data import load_las
 from welllog.tools import WellLogError
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api"
-MODEL = "anthropic/claude-opus-5.5"  # OpenRouter model slug
+# Free, tool-capable OpenRouter models, tried in order. Free models come and go: check
+# https://openrouter.ai/models?max_price=0 if all of these stop working.
+FREE_MODELS = (
+    "nvidia/nemotron-3-ultra-550b-a55b:free",
+    "nvidia/nemotron-3-super-120b-a12b:free",
+    "openrouter/free",  # OpenRouter's router: picks a random free model per request
+)
+# Errors that mean "this model can't serve us right now", so the next model is tried.
+_TRY_NEXT_MODEL = (
+    anthropic.RateLimitError,         # 429: free-tier or upstream rate limit
+    anthropic.InternalServerError,    # 5xx: provider down or overloaded
+    anthropic.NotFoundError,          # model removed from OpenRouter
+    anthropic.PermissionDeniedError,  # model gated (some free models are app-only)
+)
 MAX_ZONES_RETURNED = 50
 
 SYSTEM_PROMPT = """You answer questions about a single well log (LAS file) for a petroleum geologist.
@@ -53,21 +68,31 @@ def openrouter_client() -> anthropic.Anthropic:
     return anthropic.Anthropic(base_url=OPENROUTER_BASE_URL, auth_token=key)
 
 
+def _default_models() -> list[str]:
+    env = os.environ.get("OPENROUTER_MODEL", "")
+    return [m.strip() for m in env.split(",") if m.strip()] or list(FREE_MODELS)
+
+
 class WellLogAgent:
-    """Load a LAS file once and answer plain-English questions about it with Claude.
+    """Load a LAS file once and answer plain-English questions about it with an LLM.
 
     Each ``ask`` is independent (no chat memory). Figures produced by the plotting
     tool are appended to ``self.figures``. ``self.last_calls`` lists the tool calls made
-    during the most recent ``ask`` as ``{tool, input, output}``, so answers can be checked.
+    during the most recent ``ask`` as ``{tool, input, output}``, so answers can be checked,
+    and ``self.last_model`` names the model that answered.
+
+    ``models`` is an OpenRouter model slug or a list tried in order; it defaults to
+    ``OPENROUTER_MODEL`` (comma-separated) or else ``FREE_MODELS``.
     """
 
     def __init__(self, las_path: str | Path, client: anthropic.Anthropic | None = None,
-                 model: str = MODEL):
+                 models: str | list[str] | None = None):
         self.df, self.curves = load_las(las_path)
         self.figures = []
         self.last_calls = []
-        self.model = model
-        self.client = client or openrouter_client()
+        self.last_model = None
+        self.client = client or openrouter_client()  # loads .env, so read OPENROUTER_MODEL after
+        self.models = [models] if isinstance(models, str) else list(models or _default_models())
         self.tools = self._make_tools()
         unit = self.df.attrs.get("depth_unit") or "unknown unit"
         self.system = (
@@ -178,22 +203,38 @@ class WellLogAgent:
         return [list_curves, curve_stats, flag_zones, plot_logs]
 
     def ask(self, question: str) -> str:
-        """Answer one question. Returns Claude's text answer, or an explanation if it stopped early."""
-        self.last_calls = []
-        runner = self.client.beta.messages.tool_runner(
-            model=self.model,
-            max_tokens=16000,
-            system=self.system,
-            tools=self.tools,
-            messages=[{"role": "user", "content": question}],
-            max_iterations=20,
-        )
-        message = runner.until_done()
+        """Answer one question. Returns the model's text answer, or an explanation if it stopped early.
 
+        Tries ``self.models`` in order, moving on when a model is rate-limited or unavailable.
+        Raises ``RuntimeError`` listing each model's error if none of them can answer.
+        """
+        failures = []
+        for model in self.models:
+            self.last_calls, n_figures = [], len(self.figures)
+            try:
+                message = self.client.beta.messages.tool_runner(
+                    model=model,
+                    max_tokens=16000,
+                    system=self.system,
+                    tools=self.tools,
+                    messages=[{"role": "user", "content": question}],
+                    max_iterations=20,
+                ).until_done()
+            except _TRY_NEXT_MODEL as e:
+                del self.figures[n_figures:]  # drop plots from the abandoned attempt
+                failures.append(f"{model}: {e.status_code} {getattr(e, 'message', e)}")
+                continue
+            self.last_model = model
+            return self._answer_text(message)
+        self.last_calls = []
+        raise RuntimeError("No model could answer. Tried:\n" + "\n".join(failures))
+
+    @staticmethod
+    def _answer_text(message) -> str:
         if message.stop_reason == "refusal":
             details = getattr(message, "stop_details", None)
             reason = getattr(details, "explanation", None) if details else None
-            return "Claude declined to answer this question." + (f" ({reason})" if reason else "")
+            return "The model declined to answer this question." + (f" ({reason})" if reason else "")
 
         text = "\n".join(b.text for b in message.content if b.type == "text").strip()
         if message.stop_reason == "max_tokens":

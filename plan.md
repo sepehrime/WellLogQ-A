@@ -95,7 +95,7 @@ Each phase has **Build** tasks and **Verify** checks. Finish all the Verify boxe
 - [x] Wrap each tool with `@beta_tool` (from `anthropic`). Each wrapper has a clear docstring and returns JSON
 - [x] `plot_logs` wrapper: store the figure in `agent.figures` and send Claude back only "plot created"
 - [x] Write a short system prompt: use tools for every number, state the curve and interval used, say which threshold was picked
-- [x] `ask(question) -> str` uses `client.beta.messages.tool_runner(model="anthropic/claude-opus-5.5", max_tokens=16000, ...)` via OpenRouter
+- [x] `ask(question) -> str` uses `client.beta.messages.tool_runner(model=..., max_tokens=16000, ...)` via OpenRouter, using free models (`FREE_MODELS`) with fallback
 - [x] Check `stop_reason` before reading the answer (handle `"refusal"`)
 - [x] Load the API key (`OPENROUTER_API_KEY`) from `.env` with `python-dotenv`
 
