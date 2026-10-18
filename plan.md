@@ -21,7 +21,7 @@ Each phase has **Build** tasks and **Verify** checks. Finish all the Verify boxe
 - [x] Add `requirements.txt` listing lasio, pandas, numpy, plotly, anthropic, python-dotenv, jupyter, pytest
 - [x] `pip install -r requirements.txt`
 - [x] Create the folders `welllog/`, `data/`, `notebooks/`, `tests/` and an empty `welllog/__init__.py`
-- [ ] Add a `.env` file containing `ANTHROPIC_API_KEY=...`
+- [x] Add a `.env` file containing `OPENROUTER_API_KEY=...`
 
 **Verify**
 
@@ -91,17 +91,17 @@ Each phase has **Build** tasks and **Verify** checks. Finish all the Verify boxe
 
 **Build**
 
-- [ ] `WellLogAgent(las_path)` loads the data once and keeps `df` and `curves`
-- [ ] Wrap each tool with `@beta_tool` (from `anthropic`). Each wrapper has a clear docstring and returns JSON
-- [ ] `plot_logs` wrapper: store the figure in `agent.figures` and send Claude back only "plot created"
-- [ ] Write a short system prompt: use tools for every number, state the curve and interval used, say which threshold was picked
-- [ ] `ask(question) -> str` uses `client.beta.messages.tool_runner(model="claude-opus-5-5", max_tokens=16000, ...)`
-- [ ] Check `stop_reason` before reading the answer (handle `"refusal"`)
-- [ ] Load the API key from `.env` with `python-dotenv`
+- [x] `WellLogAgent(las_path)` loads the data once and keeps `df` and `curves`
+- [x] Wrap each tool with `@beta_tool` (from `anthropic`). Each wrapper has a clear docstring and returns JSON
+- [x] `plot_logs` wrapper: store the figure in `agent.figures` and send Claude back only "plot created"
+- [x] Write a short system prompt: use tools for every number, state the curve and interval used, say which threshold was picked
+- [x] `ask(question) -> str` uses `client.beta.messages.tool_runner(model="anthropic/claude-opus-5.5", max_tokens=16000, ...)` via OpenRouter
+- [x] Check `stop_reason` before reading the answer (handle `"refusal"`)
+- [x] Load the API key (`OPENROUTER_API_KEY`) from `.env` with `python-dotenv`
 
 **Verify**
 
-- [ ] `agent.ask("What curves are in this file?")` lists the real curves
+- [x] `agent.ask("What curves are in this file?")` lists the real curves
 - [ ] `agent.ask("Average porosity between 2500 and 2700 m?")` matches a direct `curve_stats(...)` call
 - [ ] The answer names the curve used (for example `NPHI`) and the units
 - [ ] Asking about an unknown curve or out-of-range depths gives a helpful reply, not a traceback

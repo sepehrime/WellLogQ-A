@@ -57,13 +57,13 @@ def _interval(df: pd.DataFrame, top: float | None, base: float | None) -> tuple[
     unit = df.attrs.get("depth_unit") or ""
     top = lo if top is None else float(top)
     base = hi if base is None else float(base)
-    if top > base:
-        raise WellLogError(f"Top ({top:g}) must be shallower than base ({base:g}).")
     if base < lo or top > hi:
         raise WellLogError(
             f"Interval {top:g}–{base:g} {unit} is outside the logged depth range "
             f"{lo:g}–{hi:g} {unit}.".replace("  ", " ")
         )
+    if top > base:
+        raise WellLogError(f"Top ({top:g}) must be shallower than base ({base:g}).")
     return max(top, lo), min(base, hi)
 
 
