@@ -57,13 +57,15 @@ class WellLogAgent:
     """Load a LAS file once and answer plain-English questions about it with Claude.
 
     Each ``ask`` is independent (no chat memory). Figures produced by the plotting
-    tool are appended to ``self.figures``.
+    tool are appended to ``self.figures``. ``self.last_calls`` lists the tool calls made
+    during the most recent ``ask`` as ``{tool, input, output}``, so answers can be checked.
     """
 
     def __init__(self, las_path: str | Path, client: anthropic.Anthropic | None = None,
                  model: str = MODEL):
         self.df, self.curves = load_las(las_path)
         self.figures = []
+        self.last_calls = []
         self.model = model
         self.client = client or openrouter_client()
         self.tools = self._make_tools()
@@ -73,15 +75,24 @@ class WellLogAgent:
             f"logged from {self.df.index.min():g} to {self.df.index.max():g}."
         )
 
+    def _log(self, tool: str, args: dict, out: str) -> str:
+        try:
+            output = json.loads(out)
+        except ValueError:
+            output = out
+        self.last_calls.append({"tool": tool, "input": args, "output": output})
+        return out
+
     def _make_tools(self) -> list:
         df, curves = self.df, self.curves
+        log = self._log
 
         @beta_tool
         def list_curves() -> str:
             """List the well's curves with units and descriptions, plus the logged depth range,
             depth unit, sample step and each curve's valid-data extent. Call this first when you
             need to know which curve measures a property."""
-            return _json(tools.list_curves(df, curves))
+            return log("list_curves", {}, _json(tools.list_curves(df, curves)))
 
         @beta_tool
         def curve_stats(curve: str, top: float | None = None, base: float | None = None) -> str:
@@ -93,10 +104,11 @@ class WellLogAgent:
                 top: Shallowest depth of the interval, in the well's depth unit. Omit for the top of the log.
                 base: Deepest depth of the interval, in the well's depth unit. Omit for the bottom of the log.
             """
+            args = {"curve": curve, "top": top, "base": base}
             try:
-                return _json(tools.curve_stats(df, curve, top, base))
+                return log("curve_stats", args, _json(tools.curve_stats(df, curve, top, base)))
             except WellLogError as e:
-                return _json({"error": str(e)})
+                return log("curve_stats", args, _json({"error": str(e)}))
 
         @beta_tool
         def flag_zones(curve: str, threshold: float, above: bool = True, min_thickness: float = 0,
@@ -113,11 +125,13 @@ class WellLogAgent:
                 top: Shallowest depth to search. Omit for the top of the log.
                 base: Deepest depth to search. Omit for the bottom of the log.
             """
+            args = {"curve": curve, "threshold": threshold, "above": above,
+                    "min_thickness": min_thickness, "top": top, "base": base}
             try:
                 zones = tools.flag_zones(df, curve, threshold, above, min_thickness, top, base)
             except WellLogError as e:
-                return _json({"error": str(e)})
-            return _json({
+                return log("flag_zones", args, _json({"error": str(e)}))
+            return log("flag_zones", args, _json({
                 "curve": tools.resolve_curve(df, curve),
                 "threshold": threshold,
                 "above": above,
@@ -126,7 +140,7 @@ class WellLogAgent:
                 "total_thickness": sum(z["thickness"] for z in zones),
                 "zones": zones[:MAX_ZONES_RETURNED],
                 "truncated": len(zones) > MAX_ZONES_RETURNED,
-            })
+            }))
 
         @beta_tool
         def plot_logs(curves: list[str], top: float | None = None, base: float | None = None,
@@ -145,6 +159,9 @@ class WellLogAgent:
                 zone_above: True to shade values above the threshold, False for below.
                 zone_min_thickness: Drop zones thinner than this, in the well's depth unit.
             """
+            args = {"curves": curves, "top": top, "base": base, "zone_curve": zone_curve,
+                    "zone_threshold": zone_threshold, "zone_above": zone_above,
+                    "zone_min_thickness": zone_min_thickness}
             try:
                 zones = None
                 if zone_curve is not None:
@@ -154,14 +171,15 @@ class WellLogAgent:
                                              zone_min_thickness, top, base)
                 fig = tools.plot_logs(df, curves, top, base, zones)
             except WellLogError as e:
-                return _json({"error": str(e)})
+                return log("plot_logs", args, _json({"error": str(e)}))
             self.figures.append(fig)
-            return "plot created"
+            return log("plot_logs", args, "plot created")
 
         return [list_curves, curve_stats, flag_zones, plot_logs]
 
     def ask(self, question: str) -> str:
         """Answer one question. Returns Claude's text answer, or an explanation if it stopped early."""
+        self.last_calls = []
         runner = self.client.beta.messages.tool_runner(
             model=self.model,
             max_tokens=16000,

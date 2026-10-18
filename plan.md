@@ -102,9 +102,9 @@ Each phase has **Build** tasks and **Verify** checks. Finish all the Verify boxe
 **Verify**
 
 - [x] `agent.ask("What curves are in this file?")` lists the real curves
-- [ ] `agent.ask("Average porosity between 2500 and 2700 m?")` matches a direct `curve_stats(...)` call
-- [ ] The answer names the curve used (for example `NPHI`) and the units
-- [ ] Asking about an unknown curve or out-of-range depths gives a helpful reply, not a traceback
+- [x] `agent.ask("Average porosity between 2500 and 2700 m?")` matches a direct `curve_stats(...)` call
+- [x] The answer names the curve used (for example `NPHI`) and the units
+- [x] Asking about an unknown curve or out-of-range depths gives a helpful reply, not a traceback
 
 ---
 
@@ -112,19 +112,19 @@ Each phase has **Build** tasks and **Verify** checks. Finish all the Verify boxe
 
 **Build**
 
-- [ ] Section 1: load and preview the well
-- [ ] Section 2: call the tools directly (no LLM)
-- [ ] Section 3: agent questions
-  - [ ] "What's the average porosity between 2,500 and 2,700 m?"
-  - [ ] "Flag zones with high gamma ray" (show the answer and `agent.figures[-1].show()`)
-  - [ ] One question of your own
-- [ ] Short `README.md`: what it does, setup steps, how to run it
+- [x] Section 1: load and preview the well
+- [x] Section 2: call the tools directly (no LLM)
+- [x] Section 3: agent questions
+  - [x] "What's the average porosity between 2,500 and 2,700 m?"
+  - [x] "Flag zones with high gamma ray" (show the answer and `agent.figures[-1].show()`)
+  - [x] One question of your own
+- [x] Short `README.md`: what it does, setup steps, how to run it
 
 **Verify**
 
-- [ ] "Restart kernel & run all" finishes with no errors
-- [ ] The answers in Section 3 match the direct calls in Section 2
-- [ ] Someone else could follow the README in a fresh folder
+- [x] "Restart kernel & run all" finishes with no errors
+- [x] The answers in Section 3 match the direct calls in Section 2
+- [x] Someone else could follow the README in a fresh folder
 
 ---
 

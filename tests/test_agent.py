@@ -111,3 +111,14 @@ def test_openrouter_client_uses_only_the_openrouter_key(monkeypatch):
     monkeypatch.delenv("OPENROUTER_API_KEY")
     with pytest.raises(RuntimeError, match="OPENROUTER_API_KEY"):
         agent_mod.openrouter_client()
+
+
+def test_tool_calls_are_logged(agent):
+    tool(agent, "curve_stats").call({"curve": "GR", "top": 1000, "base": 1100})
+    tool(agent, "curve_stats").call({"curve": "NPHI"})
+    assert [c["tool"] for c in agent.last_calls] == ["curve_stats", "curve_stats"]
+    assert agent.last_calls[0]["input"] == {"curve": "GR", "top": 1000, "base": 1100}
+    assert agent.last_calls[0]["output"]["count"] == 201
+    assert "error" in agent.last_calls[1]["output"]
+    agent.ask("anything")
+    assert agent.last_calls == []
