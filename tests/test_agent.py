@@ -6,22 +6,32 @@ from types import SimpleNamespace
 
 import pytest
 
-from welllog.agent import WellLogAgent
+import anthropic
+import httpx2
+
+from welllog.agent import FREE_MODELS, WellLogAgent
 from welllog.tools import curve_stats
 
 SAMPLE = Path(__file__).parent.parent / "data" / "sample.las"
 
 
 class FakeClient:
-    """Stands in for anthropic.Anthropic: records the runner params, returns a canned message."""
+    """Stands in for anthropic.Anthropic: records the runner params, returns a canned message.
 
-    def __init__(self, message):
+    ``errors`` maps a model slug to the exception its request raises.
+    """
+
+    def __init__(self, message, errors=None):
         self.params = None
-        runner = SimpleNamespace(until_done=lambda: message)
+        self.models_tried = []
+        errors = errors or {}
 
         def tool_runner(**params):
             self.params = params
-            return runner
+            self.models_tried.append(params["model"])
+            if params["model"] in errors:
+                raise errors[params["model"]]
+            return SimpleNamespace(until_done=lambda: message)
 
         self.beta = SimpleNamespace(messages=SimpleNamespace(tool_runner=tool_runner))
 
@@ -84,7 +94,8 @@ def test_ask_returns_text_and_sends_expected_params():
     agent = WellLogAgent(SAMPLE, client=client)
     assert agent.ask("porosity?") == "Mean CNLS is 28.7 PU."
     p = client.params
-    assert p["model"] == "anthropic/claude-opus-5.5" and p["max_tokens"] == 16000
+    assert p["model"] == FREE_MODELS[0] and agent.last_model == FREE_MODELS[0]
+    assert p["max_tokens"] == 16000
     assert p["messages"] == [{"role": "user", "content": "porosity?"}]
     assert [t.name for t in p["tools"]] == ["list_curves", "curve_stats", "flag_zones", "plot_logs"]
 
@@ -92,7 +103,7 @@ def test_ask_returns_text_and_sends_expected_params():
 def test_ask_handles_refusal():
     details = SimpleNamespace(explanation="policy", category=None)
     agent = WellLogAgent(SAMPLE, client=FakeClient(message("refusal", stop_details=details)))
-    assert agent.ask("x") == "Claude declined to answer this question. (policy)"
+    assert agent.ask("x") == "The model declined to answer this question. (policy)"
 
 
 def test_ask_flags_truncation():
@@ -122,3 +133,42 @@ def test_tool_calls_are_logged(agent):
     assert "error" in agent.last_calls[1]["output"]
     agent.ask("anything")
     assert agent.last_calls == []
+
+
+def api_error(cls, status):
+    response = httpx2.Response(status, request=httpx2.Request("POST", "https://openrouter.ai/api/v1/messages"))
+    return cls(f"HTTP {status}", response=response, body=None)
+
+
+def test_ask_falls_back_to_next_model_when_rate_limited():
+    client = FakeClient(message("end_turn", "ok"), errors={
+        "a:free": api_error(anthropic.RateLimitError, 429),
+        "b:free": api_error(anthropic.PermissionDeniedError, 403),
+    })
+    agent = WellLogAgent(SAMPLE, client=client, models=["a:free", "b:free", "c:free"])
+    assert agent.ask("x") == "ok"
+    assert client.models_tried == ["a:free", "b:free", "c:free"]
+    assert agent.last_model == "c:free"
+
+
+def test_ask_raises_when_every_model_fails():
+    errors = {m: api_error(anthropic.RateLimitError, 429) for m in ("a:free", "b:free")}
+    agent = WellLogAgent(SAMPLE, client=FakeClient(message("end_turn", "ok"), errors), models=["a:free", "b:free"])
+    with pytest.raises(RuntimeError, match="(?s)No model could answer.*a:free: 429.*b:free: 429"):
+        agent.ask("x")
+
+
+def test_bad_request_is_not_retried_on_other_models():
+    client = FakeClient(message("end_turn", "ok"), errors={"a:free": api_error(anthropic.BadRequestError, 400)})
+    agent = WellLogAgent(SAMPLE, client=client, models=["a:free", "b:free"])
+    with pytest.raises(anthropic.BadRequestError):
+        agent.ask("x")
+    assert client.models_tried == ["a:free"]
+
+
+def test_models_from_env(monkeypatch):
+    monkeypatch.setenv("OPENROUTER_MODEL", "x/one:free, x/two:free")
+    assert WellLogAgent(SAMPLE, client=FakeClient(None)).models == ["x/one:free", "x/two:free"]
+    monkeypatch.delenv("OPENROUTER_MODEL")
+    assert WellLogAgent(SAMPLE, client=FakeClient(None)).models == list(FREE_MODELS)
+    assert WellLogAgent(SAMPLE, client=FakeClient(None), models="x/only").models == ["x/only"]
