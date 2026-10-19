@@ -3,5 +3,6 @@
 claude.md
 .vscode
 .idea
+docs/
 
 __pycache__/
