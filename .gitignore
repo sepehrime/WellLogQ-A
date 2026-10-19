@@ -4,5 +4,6 @@ claude.md
 .vscode
 .idea
 docs/
-
+.pytest_cache/
+.DS_Store
 __pycache__/
