@@ -52,3 +52,11 @@ def test_sample_file():
     assert df.index[0] == 345.0 and df.index[-1] == 5209.0
     assert [c["mnemonic"] for c in curves] == list(df.columns)
     assert (df == -999.25).sum().sum() == 0
+
+
+def test_second_well_loads():
+    df, curves = load_las(Path(__file__).parent.parent / "data" / "sample1.las")
+    assert df.attrs["well"] == "Eubank #1" and df.attrs["depth_unit"] == "ft"
+    assert df.index[0] == 295.0 and df.shape == (8961, 22)
+    assert [c["mnemonic"] for c in curves] == list(df.columns)
+    assert (df == -999.25).sum().sum() == 0

@@ -1,0 +1,6 @@
+# Tests, linting and notebooks: pip install -r requirements-dev.txt
+-r requirements.txt
+httpx2==2.13.1  # the tests build SDK errors with it (also installed by anthropic)
+jupyter==1.1.1
+pytest==9.1.1
+ruff==0.17.1

@@ -8,6 +8,7 @@ Conventions:
     An interval that only partly overlaps the logged range is trimmed to it, and the
     interval actually used is reported back.
   - P10/P50/P90 are the 10th/50th/90th statistical percentiles (P10 is the low value).
+  - Values outside a curve's usual range (``valid_range``) are counted as suspect, not removed.
 """
 
 import math
@@ -20,6 +21,22 @@ from plotly.subplots import make_subplots
 
 class WellLogError(ValueError):
     """Invalid request against the well data (unknown curve, bad interval, no data)."""
+
+
+# Loose bounds on what a curve can plausibly read, used to count suspect samples (filler
+# values such as 100000 ohm-m, tool spikes). Matched by mnemonic first, then by unit; curves
+# with neither (for example corrections such as RHOC) get no range. Bounds are inclusive.
+_RANGES_BY_CURVE = {
+    "RHOB": (1.0, 3.5), "RHOZ": (1.0, 3.5),  # bulk density, g/cc
+    "PE": (0.0, 20.0), "PEF": (0.0, 20.0),   # photoelectric factor, b/e
+}
+_RANGES_BY_UNIT = {
+    "PU": (-30.0, 100.0),                      # porosity in percent (density porosity can go negative)
+    "V/V": (-0.3, 1.0), "DEC": (-0.3, 1.0),    # porosity as a fraction
+    "GAPI": (0.0, 500.0), "API": (0.0, 500.0),
+    "OHM-M": (0.0, 10000.0), "OHMM": (0.0, 10000.0), "OHM.M": (0.0, 10000.0),
+    "IN": (0.0, 40.0),                         # caliper
+}
 
 
 def _f(x) -> float | None:
@@ -49,6 +66,20 @@ def resolve_curve(df: pd.DataFrame, curve: str) -> str:
     raise WellLogError(
         f"Unknown curve '{curve}'. Available curves: {', '.join(map(str, df.columns))}."
     )
+
+
+def _numeric(df: pd.DataFrame, curve: str) -> str:
+    """Resolve ``curve`` and check that it holds numbers."""
+    col = resolve_curve(df, curve)
+    if not pd.api.types.is_numeric_dtype(df[col]):
+        raise WellLogError(f"{col} is not a numeric curve, so it has no statistics or zones.")
+    return col
+
+
+def valid_range(df: pd.DataFrame, curve: str) -> tuple[float, float] | None:
+    """Plausible (low, high) bounds for ``curve``, or None if unknown."""
+    col = resolve_curve(df, curve)
+    return _RANGES_BY_CURVE.get(col.upper()) or _RANGES_BY_UNIT.get(_unit(df, col).strip().upper())
 
 
 def _interval(df: pd.DataFrame, top: float | None, base: float | None) -> tuple[float, float]:
@@ -92,14 +123,20 @@ def list_curves(df: pd.DataFrame, curves: list[dict]) -> dict:
 
 def curve_stats(df: pd.DataFrame, curve: str, top: float | None = None,
                 base: float | None = None) -> dict:
-    """Mean, min, max, P10/P50/P90 and valid-sample count of ``curve`` over [top, base]."""
+    """Mean, min, max, P10/P50/P90 and valid-sample count of ``curve`` over [top, base].
+
+    Also returns ``valid_range`` (plausible bounds, or None) and ``suspect_count``, the number
+    of samples outside it (None when the range is unknown). Suspect samples stay in the stats.
+    """
     df = _sorted(df)
-    col = resolve_curve(df, curve)
+    col = _numeric(df, curve)
     top, base = _interval(df, top, base)
     values = df.loc[top:base, col].dropna()
     if values.empty:
         raise WellLogError(f"{col} has no valid samples between {top:g} and {base:g}.")
     p10, p50, p90 = np.percentile(values.to_numpy(dtype=float), [10, 50, 90])
+    bounds = valid_range(df, col)
+    suspect = None if bounds is None else int(((values < bounds[0]) | (values > bounds[1])).sum())
     return {
         "curve": col,
         "unit": _unit(df, col),
@@ -113,6 +150,8 @@ def curve_stats(df: pd.DataFrame, curve: str, top: float | None = None,
         "p10": float(p10),
         "p50": float(p50),
         "p90": float(p90),
+        "valid_range": list(bounds) if bounds else None,
+        "suspect_count": suspect,
     }
 
 
@@ -126,7 +165,7 @@ def flag_zones(df: pd.DataFrame, curve: str, threshold: float, above: bool = Tru
     thick. Missing values end a zone. Zones thinner than ``min_thickness`` are dropped.
     """
     df = _sorted(df)
-    col = resolve_curve(df, curve)
+    col = _numeric(df, curve)
     top, base = _interval(df, top, base)
     step = _step(df)
     values = df.loc[top:base, col]
@@ -161,7 +200,7 @@ def plot_logs(df: pd.DataFrame, curves: str | list[str], top: float | None = Non
         curves = [curves]
     if not curves:
         raise WellLogError("Give at least one curve to plot.")
-    cols = [resolve_curve(df, c) for c in curves]
+    cols = [_numeric(df, c) for c in curves]
     top, base = _interval(df, top, base)
     data = df.loc[top:base, cols]
     depth_unit = df.attrs.get("depth_unit") or ""
@@ -178,9 +217,15 @@ def plot_logs(df: pd.DataFrame, curves: str | list[str], top: float | None = Non
         fig.update_xaxes(title_text=f"{col} ({unit})" if unit else col, side="top",
                          type="log" if "OHM" in unit.upper() else "linear", row=1, col=i)
 
-    for z in zones or []:
-        fig.add_hrect(y0=z["top"] - half, y1=z["base"] + half, fillcolor="orange", opacity=0.3,
-                      line_width=0, layer="below", row="all", col="all")
+    # One band per zone per track, set in a single call: add_hrect per zone gets very slow
+    # with hundreds of zones.
+    axes = [("x domain", "y")] + [(f"x{i} domain", f"y{i}") for i in range(2, len(cols) + 1)]
+    fig.update_layout(shapes=[
+        {"type": "rect", "xref": xref, "yref": yref, "x0": 0, "x1": 1,
+         "y0": z["top"] - half, "y1": z["base"] + half, "fillcolor": "orange", "opacity": 0.3,
+         "line": {"width": 0}, "layer": "below"}
+        for z in zones or [] for xref, yref in axes
+    ])
 
     fig.update_yaxes(range=[base, top], title_text=f"Depth ({depth_unit})" if depth_unit else "Depth",
                      row=1, col=1)

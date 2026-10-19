@@ -20,13 +20,13 @@ explains the result.
 
 ## Setup
 
-Needs Python 3.10+ and an [OpenRouter API key](https://openrouter.ai/keys).
+Needs Python 3.12+ and an [OpenRouter API key](https://openrouter.ai/keys).
 
 ```bash
 git clone <this repo> && cd WellLogQ-A
 python3 -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
+pip install -r requirements-dev.txt   # app + notebooks, tests, lint (app only: requirements.txt)
 echo 'OPENROUTER_API_KEY=sk-or-...' > .env   # your key; .env is git-ignored
 ```
 
@@ -47,7 +47,8 @@ from welllog.agent import WellLogAgent
 
 agent = WellLogAgent("data/sample.las")
 print(agent.ask("What's the average porosity between 2500 and 2700 ft?"))
-agent.last_calls          # the tool calls (inputs and outputs) behind that answer
+agent.last_calls          # the tool calls (inputs and outputs) behind that answer, failed ones included
+agent.untraced_numbers()  # numbers in the answer that no tool or the question gave; should be []
 agent.figures[-1].show()  # after a question that asks for a plot
 ```
 
@@ -58,22 +59,27 @@ from welllog.data import load_las
 from welllog.tools import curve_stats, flag_zones, plot_logs
 
 df, curves = load_las("data/sample.las")
-curve_stats(df, "CNLS", top=2500, base=2700)                # mean, min, max, P10/P50/P90, count
+curve_stats(df, "CNLS", top=2500, base=2700)                # mean, min, max, P10/P50/P90, count, suspect_count
 zones = flag_zones(df, "GR", threshold=150, min_thickness=5)
 plot_logs(df, ["GR", "CNLS"], zones=zones).show()
 ```
 
-**Tests** (offline, no key needed):
+**Tests and lint** (offline, no key needed; GitHub Actions runs both on every push):
 
 ```bash
 pytest                                     # all tests
 pytest tests/test_tools.py::test_one_gr_spike_gives_one_zone   # a single test
+ruff check .
 ```
 
 ## Things to know
 
 - Depths are always in the file's own unit (the sample is in feet). Nothing is converted between ft and m.
 - Porosity curves in the sample (`CNLS`, `CNSS`, `CNDL`, `DPOR`) are in PU, i.e. percent.
+- Logs contain bad readings that aren't marked as missing (the sample's `RILD` uses 100000 as filler; `DPOR`
+  reaches 121 PU). They stay in the statistics, but `curve_stats` reports `suspect_count`: the number of samples
+  outside a loose plausible range for that curve type (`valid_range`, e.g. 0–500 GAPI, −30–100 PU). Curves with
+  no known range (such as corrections) get `None`.
 - Each `ask` is independent: there is no chat memory between questions.
 - **Models.** By default the agent uses free OpenRouter models, tried in this order (see `FREE_MODELS` in
   `welllog/agent.py`): `nvidia/nemotron-3-ultra-550b-a55b:free`, `nvidia/nemotron-3-super-120b-a12b:free`,
@@ -87,4 +93,5 @@ pytest tests/test_tools.py::test_one_gr_spike_gives_one_zone   # a single test
   [openrouter.ai/models?max_price=0](https://openrouter.ai/models?max_price=0) (they must support tools).
   Some free providers may log prompts; check your OpenRouter privacy settings.
 - Answers vary between runs and models; the numbers don't, since they come from the tools.
-  `agent.last_calls` shows exactly what was computed.
+  `agent.last_calls` shows exactly what was computed, and `agent.untraced_numbers()` flags any number the
+  model wrote itself (for example a unit conversion), which breaks the core rule.

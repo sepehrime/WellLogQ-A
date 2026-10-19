@@ -4,12 +4,11 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
-import pytest
-
 import anthropic
 import httpx2
+import pytest
 
-from welllog.agent import FREE_MODELS, WellLogAgent
+from welllog.agent import FREE_MODELS, WellLogAgent, untraced_numbers
 from welllog.tools import curve_stats
 
 SAMPLE = Path(__file__).parent.parent / "data" / "sample.las"
@@ -119,6 +118,7 @@ def test_openrouter_client_uses_only_the_openrouter_key(monkeypatch):
     client = agent_mod.openrouter_client()
     assert str(client.base_url).rstrip("/") == "https://openrouter.ai/api"
     assert client.api_key is None and client.auth_token == "sk-or-test"
+    assert client.max_retries == 1 and client.timeout == 180.0
     monkeypatch.delenv("OPENROUTER_API_KEY")
     with pytest.raises(RuntimeError, match="OPENROUTER_API_KEY"):
         agent_mod.openrouter_client()
@@ -135,9 +135,9 @@ def test_tool_calls_are_logged(agent):
     assert agent.last_calls == []
 
 
-def api_error(cls, status):
+def api_error(cls, status, text=None):
     response = httpx2.Response(status, request=httpx2.Request("POST", "https://openrouter.ai/api/v1/messages"))
-    return cls(f"HTTP {status}", response=response, body=None)
+    return cls(text or f"HTTP {status}", response=response, body=None)
 
 
 def test_ask_falls_back_to_next_model_when_rate_limited():
@@ -172,3 +172,53 @@ def test_models_from_env(monkeypatch):
     monkeypatch.delenv("OPENROUTER_MODEL")
     assert WellLogAgent(SAMPLE, client=FakeClient(None)).models == list(FREE_MODELS)
     assert WellLogAgent(SAMPLE, client=FakeClient(None), models="x/only").models == ["x/only"]
+
+
+def test_ask_falls_back_on_connection_error_and_model_limit():
+    request = httpx2.Request("POST", "https://openrouter.ai/api/v1/messages")
+    client = FakeClient(message("end_turn", "ok"), errors={
+        "a:free": anthropic.APITimeoutError(request=request),
+        "b:free": api_error(anthropic.BadRequestError, 400, "max_tokens: 16000 > 8192, the maximum allowed"),
+    })
+    agent = WellLogAgent(SAMPLE, client=client, models=["a:free", "b:free", "c:free"])
+    assert agent.ask("x") == "ok" and client.models_tried == ["a:free", "b:free", "c:free"]
+
+
+def test_invalid_tool_arguments_are_logged_and_returned(agent):
+    out = json.loads(tool(agent, "plot_logs").call({"curves": ["GR"], "zone_curve": "GR", "zone_threshold": "high"}))
+    assert out["error"].startswith("Tool call failed. Invalid arguments for function plot_logs")
+    assert agent.last_calls == [{"tool": "plot_logs", "output": out,
+                                 "input": {"curves": ["GR"], "zone_curve": "GR", "zone_threshold": "high"}}]
+
+
+def test_unexpected_tool_errors_are_logged(agent, monkeypatch):
+    from welllog import tools as tools_mod
+
+    def broken(*args, **kwargs):
+        raise KeyError("boom")
+
+    monkeypatch.setattr(tools_mod, "flag_zones", broken)
+    out = json.loads(tool(agent, "flag_zones").call({"curve": "GR", "threshold": 1}))
+    assert out["error"] == "Tool call failed. KeyError: 'boom'"
+    assert [(c["tool"], c["output"]) for c in agent.last_calls] == [("flag_zones", out)]
+
+
+def test_untraced_numbers():
+    calls = [{"tool": "curve_stats", "input": {"curve": "CNLS", "top": 2500, "base": 2700},
+              "output": {"mean": 28.7349, "count": 401, "p10": 20.04, "min": -1.126}}]
+    well = "Loaded well: Busse #1-27, depth unit: ft, logged from 345 to 5209."
+    ok = ("Mean CNLS over 2,500–2,700 ft is 28.73 PU (about 29), n = 401.\n"
+          "1. P10 is 20.0 and the minimum is -1.13 PU, for the 10th percentile. Busse #1-27, top 345 ft.")
+    assert untraced_numbers(ok, "between 2,500 and 2,700 ft?", well, calls) == []
+    bad = "2,500–2,700 m is roughly 8,202–8,858 ft; mean 28.7 PU, 12.5 PU above average."
+    assert untraced_numbers(bad, "2,500 to 2,700 m", well, calls) == ["8,202", "8,858", "12.5"]
+
+
+def test_agent_untraced_numbers_uses_last_question_and_calls():
+    agent = WellLogAgent(SAMPLE, client=FakeClient(message("end_turn", "GR mean is 86.5 GAPI from 345 to 5209 ft.")))
+    assert agent.untraced_numbers() == []                    # nothing asked yet
+    agent.ask("What is the mean GR?")
+    assert agent.last_question == "What is the mean GR?"
+    assert agent.untraced_numbers() == ["86.5"]               # no tool call backs it; 345/5209 come from well info
+    tool(agent, "curve_stats").call({"curve": "GR"})          # mean 86.4545...
+    assert agent.untraced_numbers() == []

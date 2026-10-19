@@ -1,8 +1,7 @@
-lasio
-pandas
-numpy
-plotly
-anthropic
-python-dotenv
-jupyter
-pytest
+# Runtime dependencies, pinned to the versions the tests pass with (needs Python 3.12+).
+anthropic==1.15.0
+lasio==0.32
+numpy==2.5.4
+pandas==3.0.6
+plotly==7.1.0
+python-dotenv==1.2.4

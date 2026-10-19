@@ -1,3 +1,4 @@
+import time
 from pathlib import Path
 
 import numpy as np
@@ -125,3 +126,41 @@ def test_plot_logs_bad_input(df):
         plot_logs(df, ["GR", "RHOB"])
     with pytest.raises(WellLogError, match="at least one curve"):
         plot_logs(df, [])
+
+
+def test_text_curve_gives_clear_error(df):
+    df["LITH"] = "shale"
+    for call in (lambda: curve_stats(df, "LITH"), lambda: flag_zones(df, "lith", threshold=1),
+                 lambda: plot_logs(df, ["GR", "LITH"])):
+        with pytest.raises(WellLogError, match="LITH is not a numeric curve"):
+            call()
+
+
+def test_curve_stats_counts_suspect_values_without_removing_them(df):
+    df.loc[100.0, "GR"] = 100000.0  # filler value, outside the GAPI range
+    stats = curve_stats(df, "GR")
+    assert stats["valid_range"] == [0.0, 500.0] and stats["suspect_count"] == 1
+    assert stats["max"] == 100000.0 and stats["count"] == 21
+    assert curve_stats(df, "NPHI")["suspect_count"] == 0                     # V/V range
+    df.attrs["units"]["NPHI"] = "XYZ"
+    assert curve_stats(df, "NPHI")["valid_range"] is None
+    assert curve_stats(df, "NPHI")["suspect_count"] is None
+
+
+def test_suspect_values_in_sample_file():
+    real, _ = load_las(SAMPLE)
+    assert curve_stats(real, "RILD")["suspect_count"] > 0                    # 100000 filler
+    assert curve_stats(real, "DPOR")["suspect_count"] > 0                    # up to 121 PU
+    assert curve_stats(real, "RHOC")["valid_range"] is None                  # correction curve
+
+
+def test_plot_logs_many_zones_is_fast():
+    real, _ = load_las(SAMPLE)
+    zones = flag_zones(real, "GR", threshold=120)
+    assert len(zones) > 200
+    start = time.perf_counter()
+    fig = plot_logs(real, ["GR", "CNLS", "RILD"], zones=zones)
+    assert time.perf_counter() - start < 2.0                                 # was ~54 s with add_hrect
+    assert len(fig.layout.shapes) == 3 * len(zones)
+    assert {(s.xref, s.yref) for s in fig.layout.shapes} == {("x domain", "y"), ("x2 domain", "y2"),
+                                                           ("x3 domain", "y3")}
