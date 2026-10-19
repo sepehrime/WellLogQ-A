@@ -1,0 +1,3 @@
+# Keep GitHub's language bar accurate (Linguist).
+# .las here means LAS well-log data, not Lasso source code.
+*.las linguist-detectable=false
